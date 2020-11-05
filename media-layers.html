@@ -22,7 +22,7 @@
           Demonstrates using the Media Layers API to create a high-quality video player inside of an "immersive-vr" session.
           <a class="back" href="./">Back</a>
         </p>
-        <label>Choose the media"s layout:</label>
+        <!-- <label>Choose the media"s layout:</label>
         <select id="layoutselect">
           <option value="./media/video/60fps.mp4">
             mono
@@ -31,7 +31,7 @@
             stereo-top-bottom
           </option>
         </select>
-        <p>Trigger = Squeeze = play / pause the video</p>
+        <p>Trigger = Squeeze = play / pause the video</p> -->
       </details>
     </header>
     <main style="text-align: center;">
@@ -49,8 +49,6 @@
       }
 
       let xrButton = null;
-      const RANGE = 2.75;
-      const SPRITE_SCALE = 550;
 
       let refSpace = null;
       let session = null;
@@ -61,22 +59,12 @@
       let renderer = null;
       let cube = null;
 
-      let video = null;
       let framebuffer = null;
       let readFramebuffer = null;
+      let helper = null;
 
-      let xrMediaBinding = null;
+      let projectionWebGlLayer = null;
       let xrWebGlBinding = null;
-      let quadMediaLayer = null;
-      let quadWebGlLayer = null;
-
-      let playSprite = null;
-      let pauseSprite = null;
-
-      let timeoutId = null;
-      let lastHandedness = null;
-      let showingProgressBar = false;
-      let isPlaying = false;
 
       function initXR() {
         xrButton = new WebXRButton({ onRequestSession, onEndSession });
@@ -105,96 +93,51 @@
           alpha: true
         });
 
+        scene.matrixAutoUpdate = false;
+        renderer.autoClear = false;
+
         if (gl) gl.canvas.remove();
         gl = renderer.getContext();
 
         renderer.xr.enabled = true;
-        renderer.setSize(1280, 105);
+        renderer.setSize(2432, 1344);
+        renderer.setClearColor(0xffffff, 1);
 
         framebuffer = gl.createFramebuffer();
         readFramebuffer = gl.createFramebuffer();
 
-        const layoutSelect = document.getElementById("layoutselect");
-        const videoSource = layoutSelect.options[layoutSelect.selectedIndex].value;
-        const layout = layoutSelect.options[layoutSelect.selectedIndex].text;
-      
         await gl.makeXRCompatible();
-        await initializeVideo(videoSource);
-        startSession(session, layout);
+        startSession(session);
       }
 
-      function initializeVideo(source) {
-        video = document.createElement("video");
-        video.src = source;
-        video.loop = true;
-        video.volume = 1;
-
-        video.addEventListener("play", () => {
-          showProgressBar();
-          isPlaying = true;
-        });
-
-        video.addEventListener("pause", () => {
-          showProgressBar();
-          isPlaying = false;
-        });
-
-        return new Promise(resolve => {
-          video.addEventListener("loadeddata", resolve);
-        });
-      }
-
-      async function startSession(session, layout) {
+      async function startSession(session) {
         document.body.appendChild(gl.canvas);
         session.requestReferenceSpace("local-floor")
           .then(referenceSpace => {
             refSpace = referenceSpace;
-            xrMediaBinding = new XRMediaBinding(session);
             xrWebGlBinding = new XRWebGLBinding(session, gl);
+            projectionWebGlLayer = xrWebGlBinding.createProjectionLayer({});
 
-            const equirectMediaLayer = xrMediaBinding.createEquirectLayer(video, { space: refSpace });
-            quadMediaLayer = xrMediaBinding.createQuadLayer(video, {
-              space: refSpace.getOffsetReferenceSpace(new XRRigidTransform({ x: 0.0, y: 0.0, z: 0.0, w: 1.0 })),
-              transform: new XRRigidTransform({ x: 0.0, y: 1.3, z: -RANGE, w: 1.0 }),
-              layout,
-            });
-
-            quadWebGlLayer = xrWebGlBinding.createQuadLayer({
-              layout: "mono",
-              space: refSpace.getOffsetReferenceSpace(new XRRigidTransform({ x: 0.0, y: 0.0, z: 0.0, w: 1.0 })),
-              transform: new XRRigidTransform({ x: 0.0, y: 0.8175, z: -RANGE, w: 1.0 }),
-              viewPixelHeight: 105,
-              viewPixelWidth: 1280,
-              height: 105 / 1280,
-              width: 1,
-            });
-
-            camera = new THREE.OrthographicCamera(0, innerWidth * 2, 0, innerHeight * -2);
-            camera.position.z = 1;
+            camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
+            camera.position.z = 1000;
             scene.add(camera);
 
-            cube = createCube(0xffffff, { x: 168.6, y: -457.5, opacity: 0.75 });
+            helper = new THREE.CameraHelper(camera);
+            helper.visible = true;
+            scene.add(helper);
+
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            cube = new THREE.Mesh(geometry, material);
+
+            cube.scale.x = 50;
+            cube.scale.y = 50;
+            cube.scale.z = 50;
             scene.add(cube);
 
-            playSprite = createSprite("./media/textures/play-button.png", { x: 168.6, y: -457.5 });
-            pauseSprite = createSprite("./media/textures/pause-button.png", { x: 168.6, y: -457.5 });
-            scene.add(pauseSprite);
-            scene.add(playSprite);
-
-            session.addEventListener("squeeze", evt => {
-              if (isPlaying) video.pause();
-              else video.play();
-            });
-
-            session.addEventListener("select", evt => {
-              if (isPlaying) video.pause();
-              else video.play();
-            });
-
-            const layers = [equirectMediaLayer, quadMediaLayer, quadWebGlLayer];
+            const layers = [projectionWebGlLayer];
             session.updateRenderState({ layers });
             
-            video.play();
             session.requestAnimationFrame(onAnimationFrame);            
           });
       }
@@ -203,12 +146,30 @@
         const pose = frame.getViewerPose(refSpace);
         if (!pose) return;
 
-        const glSubImage = xrWebGlBinding.getSubImage(quadWebGlLayer, frame);
-        determinePlayPauseVisibility();
+        cube.rotation.x += 0.02;
+				cube.rotation.y += 0.02;
+        cube.rotation.z += 0.02;
 
+        renderer.clear();
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, glSubImage.colorTexture, 0);
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFramebuffer);
+
+        for (let view of pose.views) {
+          const viewSubImage = xrWebGlBinding.getViewSubImage(projectionWebGlLayer, view);;
+          let viewMatrix = new THREE.Matrix4();
+
+          const viewport = viewSubImage.viewport;
+          renderer.setViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+
+          viewMatrix.fromArray(pose.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+
+          scene.updateMatrixWorld(true);
+          renderer.render(scene, camera);
+          renderer.clearDepth();
+
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, viewSubImage.colorTexture, 0);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFramebuffer);
+        }
 
         renderer.render(scene, camera);
         frame.session.requestAnimationFrame(onAnimationFrame);
@@ -218,66 +179,6 @@
         xrButton.setSession(null);
         session.end();
         renderer = null;
-      }
-
-      function createCube(color, { x, y, z, opacity }) {
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshBasicMaterial({ color, opacity });
-        const cube = new THREE.Mesh(geometry, material);
-
-        cube.scale.x = 650 / 7;
-        cube.scale.y = 650;
-
-        cube.position.x = x || 0;
-        cube.position.y = y || 0;
-        cube.position.z = z || 0;
-
-        return cube;
-      }
-
-      function createSprite(resourceUrl, { x, y, z }) {
-        const spriteMap = new THREE.TextureLoader().load(resourceUrl);
-        const spriteMaterial = new THREE.SpriteMaterial({ map: spriteMap });
-        const sprite = new THREE.Sprite(spriteMaterial);
-
-        sprite.scale.x = SPRITE_SCALE / 7;
-        sprite.scale.y = SPRITE_SCALE;
-        sprite.scale.z = SPRITE_SCALE;
-
-        sprite.position.x = x || 0;
-        sprite.position.y = y || 0;
-        sprite.position.z = z || 0;
-
-        return sprite;
-      }
-
-      function determinePlayPauseVisibility() {
-        playSprite.visible = false;
-        pauseSprite.visible = false;
-
-        if (showingProgressBar) {
-          if (isPlaying) pauseSprite.visible = true;
-          else playSprite.visible = true;
-        }
-      }
-
-      function hideProgressBar() {
-        showingProgressBar = false;
-        renderer.setClearColor(0x000000, 0);
-        for (let child of scene.children) { 
-          child.visible = false;
-        }
-      }
-
-      function showProgressBar() {
-        showingProgressBar = true;
-        renderer.setClearColor(0x000000, 0.75);
-        for (let child of scene.children) { 
-          child.visible = true;
-        }
-        
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(hideProgressBar, 4000);
       }
 
       // Start the XR application.
